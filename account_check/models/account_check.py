@@ -431,7 +431,7 @@ class AccountCheck(models.Model):
                 'draft', 'deposited', 'selled', 'delivered', 'transfered'],
             'delivered': ['holding'],
             'deposited': ['deposited','holding', 'rejected'],
-            'selled': ['holding'],
+            'selled': ['holding','selled'],
             'handed': ['draft'],
             'transfered': ['holding'],
             'withdrawed': ['draft'],
