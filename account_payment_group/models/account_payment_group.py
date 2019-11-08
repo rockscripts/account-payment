@@ -135,6 +135,7 @@ class AccountPaymentGroup(models.Model):
         # ('sent', 'Sent'),
         # ('reconciled', 'Reconciled')
         ('cancel', 'Cancelled'),
+        ('cancelled', 'Cancelledx'),
     ],
         readonly=True,
         default='draft',
