@@ -9,6 +9,7 @@
                 <field name="action_type" invisible="1"/>
                 <group >
                     <field name="date"/>
+		    <field name="journal_id" attrs="{'invisible': [('action_type','!=','bank_deposit')]}" domain="[('type','=','bank')]"/>
                 </group>
                 <footer>
                     <button string="Confirm" name="action_confirm" type="object" class="oe_highlight"/>
@@ -22,7 +23,6 @@
     <record id="action_account_check_action_wizard" model="ir.actions.act_window">
         <field name="name">Check Action</field>
         <field name="res_model">account.check.action.wizard</field>
-        <field name="view_type">form</field>
         <field name="view_mode">form</field>
         <field name="target">new</field>
     </record>

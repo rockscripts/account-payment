@@ -5,13 +5,12 @@
         <field name="name">account.checkbook.tree</field>
         <field name="model">account.checkbook</field>
         <field name="arch" type="xml">
-            <tree string="Checkbooks" colors="blue:state == 'draft';black:state in ('active');red:state == 'hrejected';gray:state == 'used'" editable="bottom">
+            <tree string="Checkbooks" editable="bottom">
                 <field name="issue_check_subtype"/>
                 <field name="name"/>
                 <field name="next_number"/>
                 <field name="range_to"/>
                 <field name="numerate_on_printing"/>
-                <!-- <field name="block_manual_number"/> -->
                 <field name="state"/>
             </tree>
         </field>
@@ -33,7 +32,6 @@
                         <field name="issue_check_subtype"/>
                         <field name="range_to"/>
                         <field name="numerate_on_printing"/>
-                        <!-- <field name="block_manual_number"/> -->
                         <field name="report_template"/>
                     </group>
                 </sheet>
