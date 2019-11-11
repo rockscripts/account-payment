@@ -4,6 +4,10 @@
 from odoo import models, api, fields, _
 from odoo.exceptions import ValidationError
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 
 MAP_PARTNER_TYPE_ACCOUNT_TYPE = {
     'customer': 'receivable',
@@ -21,6 +25,44 @@ class AccountPaymentGroup(models.Model):
     _order = "payment_date desc"
     _inherit = 'mail.thread'
 
+    document_number = fields.Char(
+        string='Document Number',
+        copy=False,
+        readonly=True,
+        states={'draft': [('readonly', False)]},
+        track_visibility='always',
+        index=True,
+    )
+    document_sequence_id = fields.Many2one(
+        related='receiptbook_id.sequence_id',
+    )
+    localization = fields.Char('Localizacion',default='argentina')
+    #localization = fields.Selection(
+#        related='company_id.localization',
+ #   )
+    receiptbook_id = fields.Many2one(
+        'account.payment.receiptbook',
+        'ReceiptBook',
+        readonly=True,
+        track_visibility='always',
+        states={'draft': [('readonly', False)]},
+        ondelete='restrict',
+        auto_join=True,
+    )
+    #document_type_id = fields.Many2one(
+    #    related='receiptbook_id.document_type_id',
+    #)
+    next_number = fields.Integer(
+        related='receiptbook_id.sequence_id.number_next_actual',
+        #compute='_compute_next_number',
+        string='Next Number',
+    )
+    name = fields.Char(
+        compute='_compute_name',
+        string='Document Reference',
+        store=True,
+        index=True,
+    )
     company_id = fields.Many2one(
         'res.company',
         string='Company',
@@ -53,7 +95,6 @@ class AccountPaymentGroup(models.Model):
     )
     commercial_partner_id = fields.Many2one(
         related='partner_id.commercial_partner_id',
-        readonly=True,
     )
     currency_id = fields.Many2one(
         'res.currency',
@@ -82,15 +123,15 @@ class AccountPaymentGroup(models.Model):
         string='Notes'
     )
     matched_amount = fields.Monetary(
-        compute='_compute_matched_amounts',
+        #compute='_compute_matched_amounts',
         currency_field='currency_id',
     )
     unmatched_amount = fields.Monetary(
-        compute='_compute_matched_amounts',
+        #compute='_compute_matched_amounts',
         currency_field='currency_id',
     )
     matched_amount_untaxed = fields.Monetary(
-        compute='_compute_matched_amount_untaxed',
+        #compute='_compute_matched_amount_untaxed',
         currency_field='currency_id',
     )
     selected_finacial_debt = fields.Monetary(
@@ -116,7 +157,7 @@ class AccountPaymentGroup(models.Model):
     # reconciled_amount = fields.Monetary(compute='_compute_amounts')
     to_pay_amount = fields.Monetary(
         compute='_compute_to_pay_amount',
-        inverse='_inverse_to_pay_amount',
+        #inverse='_inverse_to_pay_amount',
         string='To Pay Amount',
         # string='Total To Pay Amount',
         readonly=True,
@@ -144,8 +185,9 @@ class AccountPaymentGroup(models.Model):
         index=True,
     )
     move_lines_domain = [
-        # ('partner_id.commercial_partner_id', '=', commercial_partner_id),
+        #('move_id.partner_id.id', '=', partner_id.id),
         # ('account_id.internal_type', '=', account_internal_type),
+        ('move_id.state', '=', 'posted'),
         ('account_id.reconcile', '=', True),
         ('reconciled', '=', False),
         ('full_reconcile_id', '=', False),
@@ -161,14 +203,14 @@ class AccountPaymentGroup(models.Model):
         # no podemos ordenar por due date porque esta hardecodeado en
         # funcion _get_pair_to_reconcile
         help="Payment will be automatically matched with the oldest lines of "
-        "this list (by date, no by maturity date). You can remove any line you"
+        "this list (by maturity date). You can remove any line you"
         " dont want to be matched.",
         domain=move_lines_domain,
         readonly=True,
         states={'draft': [('readonly', False)]},
     )
     has_outstanding = fields.Boolean(
-        compute='_compute_has_outstanding',
+        #compute='_compute_has_outstanding',
     )
     to_pay_move_line_ids = fields.Many2many(
         'account.move.line',
@@ -242,7 +284,118 @@ class AccountPaymentGroup(models.Model):
         help="It indicates that the receipt has been sent."
     )
 
-    @api.multi
+
+
+    _sql_constraints = [
+        ('document_number_uniq', 'unique(document_number, receiptbook_id)',
+            'Document number must be unique per receiptbook!')]
+
+    def _compute_next_number(self):
+        """
+        show next number only for payments without number and on draft state
+        """
+        for payment in self.filtered(
+            lambda x: x.state == 'draft' and x.receiptbook_id and
+                not x.document_number):
+            sequence = payment.receiptbook_id.sequence_id
+            # we must check if sequence use date ranges
+            if not sequence.use_date_range:
+                payment.next_number = sequence.number_next_actual
+            else:
+                dt = self.payment_date or fields.Date.today()
+                seq_date = self.env['ir.sequence.date_range'].search([
+                    ('sequence_id', '=', sequence.id),
+                    ('date_from', '<=', dt),
+                    ('date_to', '>=', dt)], limit=1)
+                if not seq_date:
+                    seq_date = sequence._create_date_range_seq(dt)
+                payment.next_number = seq_date.number_next_actual
+
+
+    @api.depends(
+        # 'move_name',
+        'state',
+        'document_number',
+    )
+    def _compute_name(self):
+        """
+        * If document number and document type, we show them
+        * Else, we show name
+        """
+        for rec in self:
+            _logger.info('Getting name for payment group %s' % rec.id)
+            if rec.state == 'posted':
+                if rec.document_number:
+                    name = ("%s%s" % ('REC',rec.document_number))
+                # for compatibility with v8 migration because receipbook
+                # was not required and we dont have a name
+                else:
+                    name = ', '.join(rec.payment_ids.mapped('name'))
+            else:
+                name = _('Draft Payment')
+            rec.name = name
+
+    _sql_constraints = [
+        ('name_uniq', 'unique(document_number, receiptbook_id)',
+            'Document number must be unique per receiptbook!')]
+
+    @api.constrains('company_id', 'partner_type')
+    def _force_receiptbook(self):
+        # we add cosntrins to fix odoo tests and also help in inmpo of data
+        for rec in self:
+            if not rec.receiptbook_id:
+                rec.receiptbook_id = rec._get_receiptbook()
+
+    @api.onchange('company_id', 'partner_type')
+    def get_receiptbook(self):
+        self.receiptbook_id = self._get_receiptbook()
+
+    def _get_receiptbook(self):
+        self.ensure_one()
+        partner_type = self.partner_type or self._context.get(
+            'partner_type', self._context.get('default_partner_type', False))
+        receiptbook = self.env[
+            'account.payment.receiptbook'].search([
+                ('partner_type', '=', partner_type),
+                ('company_id', '=', self.company_id.id),
+            ], limit=1)
+        return receiptbook
+
+    @api.constrains('receiptbook_id', 'company_id')
+    def _check_company_id(self):
+        """
+        Check receiptbook_id and voucher company
+        """
+        for rec in self:
+            if (rec.receiptbook_id and
+                    rec.receiptbook_id.company_id != rec.company_id):
+                raise ValidationError(_(
+                    'The company of the receiptbook and of the '
+                    'payment must be the same!'))
+
+    @api.constrains('receiptbook_id', 'document_number')
+    def validate_document_number(self):
+        for rec in self:
+            # if we have a sequence, number is set by sequence and we dont
+            # check this
+            if rec.document_sequence_id or not rec.document_number \
+                    or not rec.receiptbook_id:
+                continue
+            # para usar el validator deberiamos extenderlo para que reciba
+            # el registro o alguna referencia asi podemos obtener la data
+            # del prefix y el padding del talonario de recibo
+            res = rec.document_number
+            padding = rec.receiptbook_id.padding
+            res = '{:>0{padding}}'.format(res, padding=padding)
+
+            prefix = rec.receiptbook_id.prefix
+            if prefix and not res.startswith(prefix):
+                res = prefix + res
+
+            if res != rec.document_number:
+                rec.document_number = res
+
+
     @api.depends(
         'state',
         'payments_amount',
@@ -250,6 +403,8 @@ class AccountPaymentGroup(models.Model):
     def _compute_matched_amounts(self):
         for rec in self:
             if rec.state != 'posted':
+                continue
+            if not rec.partner_id:
                 continue
             # damos vuelta signo porque el payments_amount tmb lo da vuelta,
             # en realidad porque siempre es positivo y se define en funcion
@@ -261,7 +416,6 @@ class AccountPaymentGroup(models.Model):
                         'payment_group_matched_amount'))
             rec.unmatched_amount = rec.payments_amount - rec.matched_amount
 
-    @api.multi
     def _compute_matched_amount_untaxed(self):
         """ Lo separamos en otro metodo ya que es un poco mas costoso y no se
         usa en conjunto con matched_amount
@@ -269,17 +423,19 @@ class AccountPaymentGroup(models.Model):
         for rec in self:
             if rec.state != 'posted':
                 continue
+            if not rec.partner_id:
+                continue
             matched_amount_untaxed = 0.0
             sign = rec.partner_type == 'supplier' and -1.0 or 1.0
             for line in rec.matched_move_line_ids.with_context(
                     payment_group_id=rec.id):
-                invoice = line.invoice_id
+                #invoice = line.invoice_id
+                invoice = line.move_id
                 factor = invoice and invoice._get_tax_factor() or 1.0
                 matched_amount_untaxed += \
                     line.payment_group_matched_amount * factor
             rec.matched_amount_untaxed = sign * matched_amount_untaxed
 
-    @api.multi
     @api.depends('to_pay_move_line_ids')
     def _compute_has_outstanding(self):
         for rec in self:
@@ -299,7 +455,6 @@ class AccountPaymentGroup(models.Model):
         recs = self.search([('payment_ids.journal_id.name', operator, value)])
         return [('id', 'in', recs.ids)]
 
-    @api.multi
     def _compute_payment_methods(self):
         # TODO tal vez sea interesante sumar al string el metodo en si mismo
         # (manual, cheque, etc)
@@ -316,35 +471,29 @@ class AccountPaymentGroup(models.Model):
             rec.payment_methods = ", ".join(rec.payment_ids.sudo().mapped(
                 'journal_id.name'))
 
-    @api.multi
     def action_payment_sent(self):
         # self.sent = True
         raise ValidationError(_('Not implemented yet'))
 
-    @api.multi
     def payment_print(self):
         # self.sent = True
         raise ValidationError(_('Not implemented yet'))
 
-    @api.multi
     @api.depends('to_pay_move_line_ids')
     def _compute_debt_move_line_ids(self):
         for rec in self:
             rec.debt_move_line_ids = rec.to_pay_move_line_ids
 
-    @api.multi
     @api.onchange('debt_move_line_ids')
     def _inverse_debt_move_line_ids(self):
         for rec in self:
             rec.to_pay_move_line_ids = rec.debt_move_line_ids
 
-    @api.multi
     def _compute_payment_pop_up(self):
         pop_up = self._context.get('pop_up', False)
         for rec in self:
             rec.pop_up = pop_up
 
-    @api.multi
     @api.depends('company_id.double_validation', 'partner_type')
     def _compute_payment_subtype(self):
         force_simple = self._context.get('force_simple')
@@ -356,7 +505,6 @@ class AccountPaymentGroup(models.Model):
                 payment_subtype = 'simple'
             rec.payment_subtype = payment_subtype
 
-    @api.multi
     def _compute_matched_move_line_ids(self):
         """
         Lar partial reconcile vinculan dos apuntes con credit_move_id y
@@ -381,13 +529,11 @@ class AccountPaymentGroup(models.Model):
 
             rec.matched_move_line_ids = lines - payment_lines
 
-    @api.multi
     @api.depends('payment_ids.move_line_ids')
     def _compute_move_lines(self):
         for rec in self:
             rec.move_line_ids = rec.payment_ids.mapped('move_line_ids')
 
-    @api.multi
     @api.depends('partner_type')
     def _compute_account_internal_type(self):
         for rec in self:
@@ -395,15 +541,12 @@ class AccountPaymentGroup(models.Model):
                 rec.account_internal_type = MAP_PARTNER_TYPE_ACCOUNT_TYPE[
                     rec.partner_type]
 
-    @api.multi
-    @api.depends('to_pay_amount', 'payments_amount')
     def _compute_payment_difference(self):
         for rec in self:
             # if rec.payment_subtype != 'double_validation':
             #     continue
             rec.payment_difference = rec.to_pay_amount - rec.payments_amount
 
-    @api.multi
     @api.depends('payment_ids.signed_amount_company_currency')
     def _compute_payments_amount(self):
         for rec in self:
@@ -417,25 +560,16 @@ class AccountPaymentGroup(models.Model):
             #     rec.partner_type == 'supplier' and
             #     -payments_amount or payments_amount)
 
-    @api.multi
-    @api.depends(
-        'to_pay_move_line_ids.amount_residual',
-        'to_pay_move_line_ids.amount_residual_currency',
-        'to_pay_move_line_ids.currency_id',
-        'to_pay_move_line_ids.invoice_id',
-        'payment_date',
-        'currency_id',
-    )
     def _compute_selected_debt(self):
         for rec in self:
             selected_finacial_debt = 0.0
             selected_debt = 0.0
             selected_debt_untaxed = 0.0
-            for line in rec.to_pay_move_line_ids:
+            for line in rec.debt_move_line_ids:
                 selected_finacial_debt += line.financial_amount_residual
                 selected_debt += line.amount_residual
                 # factor for total_untaxed
-                invoice = line.invoice_id
+                invoice = line.move_id
                 factor = invoice and invoice._get_tax_factor() or 1.0
                 selected_debt_untaxed += line.amount_residual * factor
             sign = rec.partner_type == 'supplier' and -1.0 or 1.0
@@ -443,20 +577,17 @@ class AccountPaymentGroup(models.Model):
             rec.selected_debt = selected_debt * sign
             rec.selected_debt_untaxed = selected_debt_untaxed * sign
 
-    @api.multi
-    @api.depends(
-        'selected_debt', 'unreconciled_amount')
+    #@api.depends(
+    #    'selected_debt', 'unreconciled_amount')
     def _compute_to_pay_amount(self):
         for rec in self:
             rec.to_pay_amount = rec.selected_debt + rec.unreconciled_amount
 
-    @api.multi
     @api.onchange('to_pay_amount')
     def _inverse_to_pay_amount(self):
         for rec in self:
             rec.unreconciled_amount = rec.to_pay_amount - rec.selected_debt
 
-    @api.multi
     @api.onchange('partner_id', 'partner_type', 'company_id')
     def _refresh_payments_and_move_lines(self):
         # clean actual invoice and payments
@@ -467,7 +598,6 @@ class AccountPaymentGroup(models.Model):
             rec.payment_ids = [(2, item.id, 0) for item in rec.payment_ids]
             rec.add_all()
 
-    @api.multi
     def onchange(self, values, field_name, field_onchange):
         """Necesitamos hacer esto porque los onchange que agregan lineas,
         cuando se va a guardar el registro, terminan creando registros.
@@ -483,7 +613,6 @@ class AccountPaymentGroup(models.Model):
         return super(AccountPaymentGroup, self).onchange(
             values, field_name, field_onchange)
 
-    @api.multi
     def _get_to_pay_move_lines_domain(self):
         self.ensure_one()
         return [
@@ -500,13 +629,11 @@ class AccountPaymentGroup(models.Model):
             # ('amount_residual_currency', '!=', False),
         ]
 
-    @api.multi
     def add_all(self):
         for rec in self:
             rec.to_pay_move_line_ids = rec.env['account.move.line'].search(
                 rec._get_to_pay_move_lines_domain())
 
-    @api.multi
     def remove_all(self):
         self.to_pay_move_line_ids = False
 
@@ -532,8 +659,13 @@ class AccountPaymentGroup(models.Model):
                     'You can not send to pay lines from different partners'))
             rec['partner_id'] = self._context.get(
                 'default_partner_id', partner[0].id)
-            rec['partner_type'] = MAP_ACCOUNT_TYPE_PARTNER_TYPE[
-                internal_type[0]]
+            partner_id = self._context.get('default_partner_id',partner[0].id)
+            if partner_id and partner_id.customer_rank:
+                rec['partner_type'] = 'customer'
+            if partner_id and partner_id.supplier_rank:
+                rec['partner_type'] = 'supplier'
+            #rec['partner_type'] = MAP_ACCOUNT_TYPE_PARTNER_TYPE[
+            #    internal_type[0]]
             # rec['currency_id'] = invoice['currency_id'][0]
             # rec['payment_type'] = (
             #     internal_type[0] == 'receivable' and
@@ -541,7 +673,6 @@ class AccountPaymentGroup(models.Model):
             rec['to_pay_move_line_ids'] = [(6, False, to_pay_move_line_ids)]
         return rec
 
-    @api.multi
     def button_journal_entries(self):
         return {
             'name': _('Journal Items'),
@@ -553,14 +684,12 @@ class AccountPaymentGroup(models.Model):
             'domain': [('payment_id', 'in', self.payment_ids.ids)],
         }
 
-    @api.multi
     def unreconcile(self):
         for rec in self:
             rec.payment_ids.unreconcile()
         # TODO en alguos casos setear sent como en payment?
         self.write({'state': 'posted'})
 
-    @api.multi
     def cancel(self):
         for rec in self:
             # because child payments dont have invoices we remove reconcile
@@ -573,19 +702,16 @@ class AccountPaymentGroup(models.Model):
             rec.payment_ids.write({'invoice_ids': [(5, 0, 0)]})
         self.write({'state': 'cancel'})
 
-    @api.multi
     def action_draft(self):
         self.mapped('payment_ids').action_draft()
         return self.write({'state': 'draft'})
 
-    @api.multi
     def unlink(self):
         if any(rec.state != 'draft' for rec in self):
             raise ValidationError(_(
                 "You can not delete a payment that is already posted"))
         return super(AccountPaymentGroup, self).unlink()
 
-    @api.multi
     def confirm(self):
         for rec in self:
             accounts = rec.to_pay_move_line_ids.mapped('account_id')
@@ -594,7 +720,6 @@ class AccountPaymentGroup(models.Model):
                     'To Pay Lines must be of the same account!'))
         self.write({'state': 'confirmed'})
 
-    @api.multi
     def post(self):
         # dont know yet why, but if we came from an invoice context values
         # break behaviour, for eg. with demo user error writing account.account
@@ -608,6 +733,28 @@ class AccountPaymentGroup(models.Model):
         create_from_expense = self._context.get('create_from_expense', False)
         self = self.with_context({})
         for rec in self:
+
+            if not rec.receiptbook_id:
+                rec.payment_ids.write({
+                    'receiptbook_id': False,
+                })
+                continue
+            if not rec.document_number:
+                if not rec.receiptbook_id.sequence_id:
+                    raise UserError(_(
+                        'Error!. Please define sequence on the receiptbook'
+                        ' related documents to this payment or set the '
+                        'document number.'))
+                rec.document_number = (
+                    rec.receiptbook_id.with_context(
+                        ir_sequence_date=rec.payment_date
+                        ).sequence_id.next_by_id())
+            #rec.payment_ids.write({
+            #    'document_number': rec.document_number,
+            #    'receiptbook_id': rec.receiptbook_id.id,
+            #})
+
+
             # TODO if we want to allow writeoff then we can disable this
             # constrain and send writeoff_journal_id and writeoff_acc_id
             if not rec.payment_ids:
@@ -641,8 +788,12 @@ class AccountPaymentGroup(models.Model):
                     writeoff_acc_id, writeoff_journal_id)
 
             rec.state = 'posted'
+            if rec.receiptbook_id.mail_template_id:
+                rec.message_post_with_template(
+                    rec.receiptbook_id.mail_template_id.id,
+                )
 
-    @api.multi
+
     @api.returns('mail.message', lambda value: value.id)
     def message_post(self, **kwargs):
         if self.env.context.get('mark_payment_as_sent'):

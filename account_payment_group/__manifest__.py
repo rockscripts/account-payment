@@ -14,7 +14,7 @@
         "bin": [],
     },
     "depends": [
-        "account_cancel",
+        #"account_cancel",
         "account_financial_amount",
         # for fixes related to domains and company_id field on form view
         "account_payment_fix",
@@ -27,10 +27,10 @@
         'views/account_payment_view.xml',
         'views/account_move_line_view.xml',
         'views/account_payment_group_view.xml',
-        'views/account_invoice_view.xml',
+        'views/account_payment_receiptbook_view.xml',
+        #'views/account_invoice_view.xml',
         'views/account_journal_dashboard_view.xml',
     ],
     "demo": [
     ],
-    'post_init_hook': 'post_init_hook',
 }

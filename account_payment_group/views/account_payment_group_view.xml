@@ -9,7 +9,8 @@
     <field name="model">account.payment.group</field>
     <field name="arch" type="xml">
         <tree decoration-info="state=='draft'" decoration-muted="state in ['reconciled', 'cancel']">
-            <field name="payment_date"/>
+	    <field name="payment_date"/>
+	    <field name="display_name"/>
             <!-- <field name="name"/> -->
             <field name="partner_id"/>
             <field name="payment_methods"/>
@@ -43,8 +44,8 @@
     <field name="name">account.payment.group.search</field>
     <field name="model">account.payment.group</field>
     <field name="arch" type="xml">
-        <search string="Payments">
-            <field name="display_name" filter_domain="[('communication','ilike',self)]" string="Description"/>
+    <search string="Payments">
+            <field name="display_name" filter_domain="['|',('name','ilike',self),('communication','ilike',self)]" string="Description"/>
             <separator/>
             <field name="payment_methods"/>
             <field name="partner_id" />
@@ -70,7 +71,9 @@
     <field name="name">Payment Multi</field>
     <field name="model">account.payment.group</field>
     <field name="arch" type="xml">
-        <form string="Register Payment">
+    	<form string="Register Payment">
+            <field name="document_sequence_id" invisible="1"/>
+            <field name="localization" invisible="1"/>
             <field name="account_internal_type" invisible="1"/>
             <field name="id" invisible="1"/>
             <field name="commercial_partner_id" invisible="1"/>
@@ -106,8 +109,11 @@
                 </div>
                 <field name="id" invisible="1"/>
                 <div class="oe_title">
-                    <h1></h1>
-                    <!-- <h1><field name="name"/></h1> -->
+	            <h1>
+       		        <field name="display_name" attrs="{'invisible': [('display_name', '=', False)]}" class="oe_inline"/>
+	                <label for="next_number" string="- Next Number: " attrs="{'invisible': [('next_number', 'in', (0, False))]}" class="oe_inline"/>
+        	        <field name="next_number" attrs="{'invisible': [('next_number', 'in', (0, False))]}" class="oe_inline"/>
+	            </h1>
                 </div>
                 <group>
                     <group>
@@ -115,7 +121,11 @@
                         <field name="currency_id" invisible="1"/>
                         <!-- <field name="payment_type" widget="radio"/> -->
                         <!-- <b><field name="partner_type" nolabel="1" widget="selection" string="" attrs="{'required': [('payment_type', 'in', ('inbound', 'outbound'))], 'readonly': [('state', '!=', 'draft')]}"/></b> -->
-                        <field name="partner_id" context="{'default_is_company': True, 'default_supplier': partner_type == 'supplier', 'default_customer': partner_type == 'customer'}" domain="[(partner_type, '=', True)]"  invisible="context.get('pop_up')"/>
+			<!-- field name="partner_id" context="{'default_is_company': True, 'default_supplier': partner_type == 'supplier', 'default_customer': partner_type == 'customer'}" 
+				domain="[(partner_type, '=', True)]"  
+				invisible="context.get('pop_up')"/ -->
+			<field name="partner_id" context="{'default_is_company': True, 'default_supplier': partner_type == 'supplier', 'default_customer': partner_type == 'customer'}" 
+				invisible="context.get('pop_up')"/>
                         <!-- <field name="partner_id" attrs="{'required': [('payment_type', 'in', ('inbound', 'outbound'))]}" context="{'default_is_company': True, 'default_supplier': payment_type == 'outbound', 'default_customer': payment_type == 'inbound'}" domain="[(partner_type, '=', True)]"/> -->
                         <!-- <field name="partner_id" nolabel="1" attrs="{'required': [('payment_type', 'in', ('inbound', 'outbound'))], 'invisible': [('payment_type', 'not in', ('inbound', 'outbound'))], 'readonly': [('state', '!=', 'draft')]}" context="{'default_is_company': True, 'default_supplier': payment_type == 'outbound', 'default_customer': payment_type == 'inbound'}"/> -->
                         <!-- <label for="amount"/>
@@ -124,7 +134,9 @@
                             <field name="currency_id" options="{'no_create': True, 'no_open': True}" groups="base.group_multi_currency" attrs="{'readonly': [('state', '!=', 'draft')]}"/>
                         </div> -->
                     </group>
-                    <group>
+		    <group>
+		        <field name="receiptbook_id" attrs="{'invisible': [('localization', '=', False)], 'required':[('localization', '!=', False), ('state', '=', 'draft')]}" domain="[('partner_type', '=', partner_type), ('company_id', '=', company_id)]"/>
+                        <field name="document_number" attrs="{'invisible': ['|', ('document_sequence_id', '!=', False), ('localization', '=', False)], 'required': [('document_sequence_id', '=', False), ('localization', '!=', False)]}"/>
                         <field name="payment_date"/>
                         <field name="communication" attrs="{'invisible': [('state', '!=', 'draft'), ('communication', '=', False)]}"/>
                     </group>
@@ -132,7 +144,7 @@
                 <!-- <group attrs="{'invisible': [('payment_subtype', '!=', 'double_validation')]}"> -->
                     <group>
                         <field name="selected_debt" options="{'currency_field': 'currency_id'}" states="draft,confirmed"/>
-                        <field name="selected_finacial_debt" options="{'currency_field': 'currency_id'}" states="draft,confirmed" groups="account_debt_management.account_use_financial_amounts"/>
+                        <field name="selected_finacial_debt" options="{'currency_field': 'currency_id'}" states="draft,confirmed" groups="account_financial_amount.account_use_financial_amounts"/>
                         <field name="matched_amount" options="{'currency_field': 'currency_id'}" states="posted"/>
                         <field name="unmatched_amount" options="{'currency_field': 'currency_id'}" states="posted"/>
                         <field name="unreconciled_amount" options="{'currency_field': 'currency_id'}" attrs="{'invisible': ['|', ('payment_subtype', '!=', 'double_validation'), ('state', 'not in', ['draft', 'confirmed'])]}"/>
@@ -171,7 +183,7 @@
                     </page>
                     <page string="Debts" attrs="{'invisible': ['|', '|', ('pop_up', '=', True), ('payment_subtype', '!=', 'simple'), ('state', '!=', 'draft')]}">
                         <p>
-                            Payment will be automatically matched with the oldest lines of this list (by date, no by maturity date). You can remove any line you dont want to be matched.
+                            Payment will be automatically matched with the oldest lines of this list (by maturity date). You can remove any line you dont want to be matched.
                         </p>
                         <button name="add_all" string="Add All / Refresh" states="draft" type="object"/>
                         <button name="remove_all" string="Remove All" states="draft" type="object"/>
@@ -180,7 +192,7 @@
                         <field name="debt_move_line_ids" context="{'tree_view_ref': 'account_payment_group.view_move_line_tree'}" domain="[('partner_id.commercial_partner_id', '=', commercial_partner_id),('account_id.internal_type', '=', account_internal_type),('account_id.reconcile', '=', True),('reconciled', '=', False), ('full_reconcile_id', '=', False),('company_id', '=', company_id)]"/>
                     </page>
                     <page string="Paid" states="posted">
-                        <field name="matched_move_line_ids" context="{'payment_group_id': id, 'matched_lines': True, 'tree_view_ref': 'account_payment_group.view_move_line_tree'}"/>
+                        <field name="matched_move_line_ids" context="{'payment_group_id': id, 'tree_view_ref': 'account_payment_group.view_move_line_with_matched_tree'}"/>
                     </page>
                     <page string="Notes">
                         <field name="notes"/>
@@ -210,7 +222,6 @@
 <record id="action_account_payments_group" model="ir.actions.act_window">
     <field name="name">Customer Receipts</field>
     <field name="res_model">account.payment.group</field>
-    <field name="view_type">form</field>
     <field name="view_mode">tree,form,graph</field>
     <!-- <field name="context">{'default_payment_type': 'inbound'}</field> -->
     <field name="context">{'default_partner_type': 'customer', 'search_default_not_cancelled': 1}</field>
@@ -231,7 +242,6 @@
 <!-- <record id="action_account_invoice_payment_group" model="ir.actions.act_window">
     <field name="name">Register Payment</field>
     <field name="res_model">account.payment.group</field>
-    <field name="view_type">form</field>
     <field name="view_mode">form</field>
     <field name="context">{'default_invoice_ids': [(4, active_id, None)]}</field>
     <field name="target">new</field>
@@ -240,7 +250,6 @@
 <record id="action_account_payments_group_payable" model="ir.actions.act_window">
     <field name="name">Supplier Payments</field>
     <field name="res_model">account.payment.group</field>
-    <field name="view_type">form</field>
     <field name="view_mode">tree,form,graph</field>
     <field name="context">{'default_partner_type': 'supplier', 'search_default_not_cancelled': 1}</field>
     <!-- <field name="context">{'default_payment_type': 'outbound', 'default_partner_type': 'supplier'}</field> -->
