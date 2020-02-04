@@ -165,18 +165,17 @@ class AccountCheck(models.Model):
         readonly=True,
         index=True,
     )
-    # TODO BORRAR EN V12
-    # lo mantenemos pero invisible por si alguien lo llega a necesitar
     partner_id = fields.Many2one(
         related='operation_ids.partner_id',
         readonly=True,
         store=True,
         index=True,
+	string='Last operation partner',
     )
     first_partner_id = fields.Many2one(
         'res.partner',
         compute='_compute_first_partner',
-        string='Partner',
+        string='First operation partner',
         readonly=True,
         store=True,
     )
@@ -431,13 +430,13 @@ class AccountCheck(models.Model):
                 'draft', 'deposited', 'selled', 'delivered', 'transfered'],
             'delivered': ['holding'],
             'deposited': ['deposited','holding', 'rejected'],
-            'selled': ['holding'],
+            'selled': ['holding','selled'],
             'handed': ['draft'],
             'transfered': ['holding'],
             'withdrawed': ['draft'],
-            'rejected': ['delivered', 'deposited', 'selled', 'handed'],
+            'rejected': ['rejected','delivered', 'deposited', 'selled', 'handed'],
             'debited': ['handed'],
-            'returned': ['handed', 'holding'],
+            'returned': ['handed', 'holding','deposited','selled'],
             'changed': ['handed', 'holding'],
             'cancel': ['draft'],
             'reclaimed': ['rejected'],
@@ -465,6 +464,26 @@ class AccountCheck(models.Model):
         return super(AccountCheck, self).unlink()
 
 # checks operations from checks
+
+    @api.multi
+    def bank_return(self):
+        self.ensure_one()
+        if self.state in ['deposited','selled'] and self.type == 'third_check':
+            journal_id = None
+            for oper in self.operation_ids:
+                if oper.operation in ['deposited','selled']:
+                     journal_id = oper.origin.journal_id
+            vals = self.get_bank_vals('bank_return', journal_id)
+            date = self._context.get('action_date')
+            if not date:
+                     vals['date'] = action_date or fields.Date.today()
+            else:
+                     vals['date'] = str(date)
+            move = self.env['account.move'].create(vals)
+            move.post()
+            self._add_operation('returned', move, date=vals['date'])
+            self.write({'state': 'holding'})
+
 
     @api.multi
     def bank_debit(self):
@@ -655,8 +674,12 @@ class AccountCheck(models.Model):
                 force_account_id=self.company_id._get_check_account(
                     'rejected').id,
             ).create(payment_vals)
+	
             self.post_payment_check(payment)
             self._add_operation('rejected', payment, date=payment.payment_date)
+            return self.action_create_debit_note(
+                'rejected', 'customer', operation.partner_id,
+                self.company_id._get_check_account('deferred'))
         elif self.state == 'delivered':
             operation = self._get_operation(self.state, True)
             return self.action_create_debit_note(
@@ -686,6 +709,7 @@ class AccountCheck(models.Model):
         journal = self.env['account.journal'].search([
             ('company_id', '=', self.company_id.id),
             ('type', '=', journal_type),
+            ('use_documents', '=', True),
         ], limit=1)
 
         # si pedimos rejected o reclamo, devolvemos mensaje de rechazo y cuenta
@@ -704,9 +728,14 @@ class AccountCheck(models.Model):
             # 'product_id': self.product_id.id,
             'name': name,
             'account_id': account.id,
-            'price_unit': self.amount,
+            'price_unit': 0,
             # 'invoice_id': invoice.id,
         }
+
+
+        for oper in self.operation_ids:
+            if oper.partner_id:
+                partner = oper.partner_id
 
         inv_vals = {
             # this is the reference that goes on account.move.line of debt line
