@@ -127,7 +127,7 @@ class AccountCheck(models.Model):
     _name = 'account.check'
     _description = 'Account Check'
     _order = "id desc"
-    _inherit = ['mail.thread']
+    _inherit = ['mail.thread', 'mail.activity.mixin']
 
     operation_ids = fields.One2many(
         'account.check.operation',
@@ -619,18 +619,16 @@ class AccountCheck(models.Model):
         self.ensure_one()
         if self.state in ['rejected'] and self.type == 'third_check':
             # anulamos la operación en la que lo recibimos
-            operation = self._get_operation('holding', True)
             return self.action_create_debit_note(
-                'reclaimed', 'customer', operation.partner_id,
+                'reclaimed', 'customer', self.first_partner_id,
                 self.company_id._get_check_account('rejected'))
 
     @api.multi
     def customer_return(self):
         self.ensure_one()
         if self.state in ['holding'] and self.type == 'third_check':
-            operation = self._get_operation('holding', True)
             return self.action_create_debit_note(
-                'returned', 'customer', operation.partner_id,
+                'returned', 'customer', self.first_partner_id,
                 self.get_third_check_account())
 
     @api.model
@@ -653,6 +651,20 @@ class AccountCheck(models.Model):
             journal._default_outbound_payment_methods().id,
             # 'check_ids': [(4, self.id, False)],
         }
+
+    @api.constrains('currency_id', 'amount', 'amount_company_currency')
+    def _check_amounts(self):
+        for rec in self.filtered(
+                lambda x: not x.amount or not x.amount_company_currency):
+            if rec.currency_id != rec.company_currency_id:
+                raise ValidationError(_(
+                    'If you create a check with different currency thant the '
+                    'company currency, you must provide "Amount" and "Amount '
+                    'Company Currency"'))
+            elif not rec.amount:
+                rec.amount = rec.amount_company_currency
+            elif not rec.amount_company_currency:
+                rec.amount_company_currency = rec.amount
 
     @api.multi
     def reject(self):
