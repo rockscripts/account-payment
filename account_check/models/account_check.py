@@ -643,11 +643,11 @@ class AccountCheck(models.Model):
         action_date = self._context.get('action_date', fields.Date.today())
         payment_methods = journal._default_outbound_payment_methods()
         payment_method = payment_methods[0]
-        for pm in payment_methods:
-            if (pm.code=="issue_check" and self.type=="issue_check"):
-                payment_method = pm
-            if (pm.code=="delivered_issue_check" and self.type=="third_check"):
-                payment_method = pm
+        payment_methods_f = payment_methods.filtered(
+            lambda x: (x.code=="issue_check" and self.type=="issue_check" and self.state!="delivered") or (x.code=="delivered_issue_check" and self.type=="issue_check" and self.type=="delivered"))
+        if (len(payment_methods_f)):
+            payment_method = payment_methods_f[0]
+        _logger.info(journal.name)
         return {
             'amount': self.amount,
             'currency_id': self.currency_id.id,
