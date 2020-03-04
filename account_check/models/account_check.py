@@ -641,6 +641,13 @@ class AccountCheck(models.Model):
         and we don't want to confuse them with this payments
         """
         action_date = self._context.get('action_date', fields.Date.today())
+        payment_methods = journal._default_outbound_payment_methods()
+        payment_method = payment_methods[0]
+        for pm in payment_methods:
+            if (pm.code=="issue_check" and self.type=="issue_check"):
+                payment_method = pm
+            if (pm.code=="delivered_issue_check" and self.type=="third_check"):
+                payment_method = pm
         return {
             'amount': self.amount,
             'currency_id': self.currency_id.id,
@@ -648,7 +655,7 @@ class AccountCheck(models.Model):
             'payment_date': action_date,
             'payment_type': 'outbound',
             'payment_method_id':
-            journal._default_outbound_payment_methods().id,
+            payment_method.id,
             # 'check_ids': [(4, self.id, False)],
         }
 
@@ -686,7 +693,7 @@ class AccountCheck(models.Model):
                 force_account_id=self.company_id._get_check_account(
                     'rejected').id,
             ).create(payment_vals)
-	
+
             self.post_payment_check(payment)
             self._add_operation('rejected', payment, date=payment.payment_date)
             return self.action_create_debit_note(
