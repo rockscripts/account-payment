@@ -86,7 +86,8 @@ class AccountPayment(models.Model):
                 self.signed_amount = rec.signed_amount
                 self.signed_amount_company_currency = rec.signed_amount_company_currency
 
-    @api.depends('currency_id', 'company_currency_id')
+    #@api.depends('currency_id', 'company_currency_id')
+    @api.multi
     def _compute_other_currency(self):
         #import pdb;pdb.set_trace()
         res = {}

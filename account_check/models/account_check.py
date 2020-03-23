@@ -427,14 +427,14 @@ class AccountCheck(models.Model):
         operation_from_state_map = {
             # 'draft': [False],
             'holding': [
-                'draft', 'deposited', 'selled', 'delivered', 'transfered'],
+                'draft', 'deposited', 'selled', 'delivered', 'transfered','rejected'],
             'delivered': ['holding'],
             'deposited': ['deposited','holding', 'rejected'],
             'selled': ['holding','selled'],
             'handed': ['draft'],
             'transfered': ['holding'],
             'withdrawed': ['draft'],
-            'rejected': ['rejected','delivered', 'deposited', 'selled', 'handed'],
+            'rejected': ['delivered', 'deposited', 'selled', 'handed','holding'],
             'debited': ['handed'],
             'returned': ['handed', 'holding','deposited','selled'],
             'changed': ['handed', 'holding'],
@@ -671,10 +671,10 @@ class AccountCheck(models.Model):
         self.ensure_one()
         if self.state in ['deposited', 'selled']:
             operation = self._get_operation(self.state)
-            if operation.origin._name == 'account.payment':
+            if operation.origin and operation.origin._name == 'account.payment':
                 journal = operation.origin.destination_journal_id
             # for compatibility with migration from v8
-            elif operation.origin._name == 'account.move':
+            elif operation.origin and operation.origin._name == 'account.move':
                 journal = operation.origin.journal_id
             else:
                 raise ValidationError(_(
