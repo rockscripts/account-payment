@@ -427,14 +427,14 @@ class AccountCheck(models.Model):
         operation_from_state_map = {
             # 'draft': [False],
             'holding': [
-                'draft', 'deposited', 'selled', 'delivered', 'transfered'],
+                'draft', 'deposited', 'selled', 'delivered', 'transfered','rejected'],
             'delivered': ['holding'],
             'deposited': ['deposited','holding', 'rejected'],
             'selled': ['holding','selled'],
             'handed': ['draft'],
             'transfered': ['holding'],
             'withdrawed': ['draft'],
-            'rejected': ['rejected','delivered', 'deposited', 'selled', 'handed'],
+            'rejected': ['rejected','delivered', 'deposited', 'selled', 'handed','holding'],
             'debited': ['handed'],
             'returned': ['handed', 'holding','deposited','selled'],
             'changed': ['handed', 'holding'],
@@ -687,27 +687,54 @@ class AccountCheck(models.Model):
                 raise ValidationError(_(
                     'The deposit operation is not linked to a payment.'
                     'If you want to reject you need to do it manually.'))
-            payment_vals = self.get_payment_values(journal)
-            payment = self.env['account.payment'].with_context(
-                default_name=_('Check "%s" rejection') % (self.name),
-                force_account_id=self.company_id._get_check_account(
-                    'rejected').id,
-            ).create(payment_vals)
+            #payment_vals = self.get_payment_values(journal)
+            #payment = self.env['account.payment'].with_context(
+            #    default_name=_('Check "%s" rejection') % (self.name),
+            #    force_account_id=self.company_id._get_check_account(
+            #        'rejected').id,
+           # ).create(payment_vals)
 
-            self.post_payment_check(payment)
-            self._add_operation('rejected', payment, date=payment.payment_date)
+            # self.post_payment_check(payment)
+            if not operation.origin:
+                       journal_id = self.env['account.journal'].search([('code','=','Vario'),('company_id','=',self.company_id.id)])
+                       if not journal_id:
+                                raise Validation('No se puede determinar el journal')
+            else:
+                       origin = operation.origin
+                       journal_id = origin.journal_id
+            vals = self.get_bank_vals('deposited_rejected', journal_id)
+            action_date = self._context.get('action_date')
+            if not action_date:
+                        vals['date'] = action_date or fields.Date.today()
+            else:
+                        vals['date'] = str(action_date)
+            move = self.env['account.move'].create(vals)
+            move.post()
+            self._add_operation('rejected', move, date=action_date)
             return self.action_create_debit_note(
                 'rejected', 'customer', operation.partner_id,
                 self.company_id._get_check_account('deferred'))
         elif self.state == 'delivered':
             operation = self._get_operation(self.state, True)
+            journal_id = self.env['account.journal'].search([('code','=','Vario'),('company_id','=',self.company_id.id)])
+            if not journal_id:
+                        raise Validation('No se puede determinar el journal')
+            vals = self.get_bank_vals('delivered_rejected', journal_id)
+            action_date = self._context.get('action_date')
+            if not action_date:
+                        vals['date'] = action_date or fields.Date.today()
+            else:
+                        vals['date'] = str(action_date)
+            move = self.env['account.move'].create(vals)
+            move.post()
+            self._add_operation('rejected', move, date=vals['date'])
             return self.action_create_debit_note(
-                'rejected', 'supplier', operation.partner_id,
+                'rejected', 'customer', operation.partner_id,
                 self.company_id._get_check_account('rejected'))
         elif self.state == 'handed':
             operation = self._get_operation(self.state, True)
             return self.action_create_debit_note(
-                'rejected', 'supplier', operation.partner_id,
+                'rejected', 'customer', operation.partner_id,
                 self.company_id._get_check_account('deferred'))
 
     @api.multi
