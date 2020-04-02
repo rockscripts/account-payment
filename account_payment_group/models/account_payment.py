@@ -95,7 +95,7 @@ class AccountPayment(models.Model):
         #_logger.info("_compute_other_currency")
         ocur = False
         for rec in self:
-            rec.other_currency = False
+            #rec.other_currency = False
             if rec.company_currency_id and rec.currency_id and \
                rec.company_currency_id != rec.currency_id:
                 rec.other_currency = True
